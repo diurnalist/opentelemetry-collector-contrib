@@ -4,9 +4,11 @@
 package protocol // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/statsdreceiver/internal/protocol"
 
 import (
+	"math"
 	"sort"
 	"time"
 
+	"github.com/lightstep/go-expohisto/mapping/exponent"
 	"github.com/lightstep/go-expohisto/structure"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
@@ -16,7 +18,22 @@ import (
 
 var (
 	statsDDefaultPercentiles = []float64{0, 10, 50, 90, 95, 100}
+
+	explicitHistogramMaxSize                              = 30 // covers values from 2^-15..2^15, roughly
+	explicitHistogramBoundaries, explicitHistogramBuckets = getExplicitHistogramBoundaries()
 )
+
+func getExplicitHistogramBoundaries() ([]float64, []uint64) {
+	scale := 0
+	boundaries := []float64{math.Inf(-1)}
+	buckets := []uint64{0}
+	for i := 0; i < explicitHistogramMaxSize; i++ {
+		exponent := i - (explicitHistogramMaxSize / 2)
+		boundaries = append(boundaries, math.Pow(2, float64(exponent)*math.Pow(2.0, -float64(scale))))
+		buckets = append(buckets, 0)
+	}
+	return boundaries, buckets
+}
 
 func buildCounterMetric(parsedMetric statsDMetric, isMonotonicCounter bool) pmetric.ScopeMetrics {
 	ilm := pmetric.NewScopeMetrics()
@@ -166,7 +183,7 @@ func setCommonDpFields(dp pmetric.NumberDataPoint, start pcommon.Timestamp, now 
 	}
 }
 
-func buildHistogramMetric(desc statsDMetricDescription, histogram histogramMetric, startTime, timeNow time.Time, ilm pmetric.ScopeMetrics) {
+func buildExponentialHistogramMetric(desc statsDMetricDescription, histogram histogramMetric, startTime, timeNow time.Time, ilm pmetric.ScopeMetrics) {
 	nm := ilm.Metrics().AppendEmpty()
 	nm.SetName(desc.name)
 	expo := nm.SetEmptyExponentialHistogram()
@@ -208,6 +225,52 @@ func buildHistogramMetric(desc statsDMetricDescription, histogram histogramMetri
 		for i := uint32(0); i < in.Len(); i++ {
 			out.BucketCounts().Append(in.At(i))
 		}
+	}
+}
+
+func buildHistogramMetric(desc statsDMetricDescription, histogram explicitHistogramMetric, startTime, timeNow time.Time, ilm pmetric.ScopeMetrics) {
+	nm := ilm.Metrics().AppendEmpty()
+	nm.SetName(desc.name)
+	hist := nm.SetEmptyHistogram()
+	hist.SetAggregationTemporality(pmetric.AggregationTemporalityDelta)
+
+	dp := hist.DataPoints().AppendEmpty()
+	dp.ExplicitBounds().FromRaw(explicitHistogramBoundaries)
+	dp.BucketCounts().FromRaw(explicitHistogramBuckets)
+
+	mapper, _ := exponent.NewMapping(0)
+
+	sum := 0.0
+	min := math.MaxFloat64
+	max := -math.MaxFloat64
+	for _, dpt := range histogram.points {
+		sum += dpt
+		min = math.Min(min, dpt)
+		max = math.Max(max, dpt)
+
+		idx := int(mapper.MapToIndex(dpt))
+		// normalize to [0, ...)
+		idx += (dp.BucketCounts().Len() / 2) + 1
+
+		if idx >= 0 && idx < dp.BucketCounts().Len() {
+			dp.BucketCounts().SetAt(idx, dp.BucketCounts().At(idx)+1)
+		} else {
+			dp.BucketCounts().SetAt(0, dp.BucketCounts().At(0)+1)
+		}
+	}
+
+	dp.SetCount(uint64(len(histogram.points)))
+	dp.SetSum(sum)
+	if dp.Count() != 0 {
+		dp.SetMin(min)
+		dp.SetMax(max)
+	}
+
+	dp.SetStartTimestamp(pcommon.NewTimestampFromTime(startTime))
+	dp.SetTimestamp(pcommon.NewTimestampFromTime(timeNow))
+
+	for i := desc.attrs.Iter(); i.Next(); {
+		dp.Attributes().PutStr(string(i.Attribute().Key), i.Attribute().Value.AsString())
 	}
 }
 
