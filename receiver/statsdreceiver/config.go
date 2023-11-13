@@ -57,7 +57,8 @@ func (c *Config) Validate() error {
 		case protocol.GaugeObserver,
 			protocol.SummaryObserver,
 			protocol.DatadogSummaryObserver,
-			protocol.HistogramObserver:
+			protocol.HistogramObserver,
+			protocol.ExplicitHistogramObserver:
 			// do nothing
 		case protocol.DisableObserver:
 			fallthrough

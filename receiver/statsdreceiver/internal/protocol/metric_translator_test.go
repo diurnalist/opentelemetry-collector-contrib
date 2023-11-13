@@ -262,8 +262,15 @@ func TestBuildDatadogSummaryMetricUnsampled(t *testing.T) {
 	mMedian.SetName("testSummary.median")
 	mMedian.SetEmptyGauge()
 	dpMedian := mMedian.Gauge().DataPoints().AppendEmpty()
-	dpMedian.SetDoubleValue(3.5)
+	dpMedian.SetDoubleValue(3)
 	setCommonDatapointFields(dpMedian, startTimestamp, nowTimestamp, desc)
+
+	mMin := expectedMetric.Metrics().AppendEmpty()
+	mMin.SetName("testSummary.min")
+	mMin.SetEmptyGauge()
+	dpMin := mMin.Gauge().DataPoints().AppendEmpty()
+	dpMin.SetDoubleValue(1)
+	setCommonDatapointFields(dpMin, startTimestamp, nowTimestamp, desc)
 
 	mMax := expectedMetric.Metrics().AppendEmpty()
 	mMax.SetName("testSummary.max")
@@ -321,28 +328,35 @@ func TestBuildSummaryMetricSampled(t *testing.T) {
 	mAvg.SetName("testSummary.avg")
 	mAvg.SetEmptyGauge()
 	dpAvg := mAvg.Gauge().DataPoints().AppendEmpty()
-	dpAvg.SetDoubleValue(42.333333333333336)
+	dpAvg.SetDoubleValue(2.54)
 	setCommonDatapointFields(dpAvg, startTimestamp, nowTimestamp, desc)
 
 	mMedian := expectedMetric.Metrics().AppendEmpty()
 	mMedian.SetName("testSummary.median")
 	mMedian.SetEmptyGauge()
 	dpMedian := mMedian.Gauge().DataPoints().AppendEmpty()
-	dpMedian.SetDoubleValue(22.5)
+	dpMedian.SetDoubleValue(2)
 	setCommonDatapointFields(dpMedian, startTimestamp, nowTimestamp, desc)
+
+	mMin := expectedMetric.Metrics().AppendEmpty()
+	mMin.SetName("testSummary.min")
+	mMin.SetEmptyGauge()
+	dpMin := mMin.Gauge().DataPoints().AppendEmpty()
+	dpMin.SetDoubleValue(0)
+	setCommonDatapointFields(dpMin, startTimestamp, nowTimestamp, desc)
 
 	mMax := expectedMetric.Metrics().AppendEmpty()
 	mMax.SetName("testSummary.max")
 	mMax.SetEmptyGauge()
 	dpMax := mMax.Gauge().DataPoints().AppendEmpty()
-	dpMax.SetDoubleValue(120)
+	dpMax.SetDoubleValue(5)
 	setCommonDatapointFields(dpMax, startTimestamp, nowTimestamp, desc)
 
 	mP95 := expectedMetric.Metrics().AppendEmpty()
 	mP95.SetName("testSummary.95percentile")
 	mP95.SetEmptyGauge()
 	dpP95 := mP95.Gauge().DataPoints().AppendEmpty()
-	dpP95.SetDoubleValue(120)
+	dpP95.SetDoubleValue(4)
 	setCommonDatapointFields(dpP95, startTimestamp, nowTimestamp, desc)
 
 	assert.Equal(t, expectedMetric, metric)
@@ -354,4 +368,81 @@ func setCommonDatapointFields(dp pmetric.NumberDataPoint, start pcommon.Timestam
 	for _, kv := range desc.attrs.ToSlice() {
 		dp.Attributes().PutStr(string(kv.Key), kv.Value.AsString())
 	}
+}
+
+func TestBuildHistogramMetric(t *testing.T) {
+	timeNow := time.Now()
+	metricDescription := statsDMetricDescription{
+		name: "testHistogram",
+		attrs: attribute.NewSet(
+			attribute.String("mykey", "myvalue"),
+			attribute.String("mykey2", "myvalue2"),
+		),
+	}
+
+	parsedMetric := explicitHistogramMetric{
+		points: []float64{
+			0,
+			0.0001, // 0.1ms
+			0.0010, // 1ms
+			0.0100, // 10ms
+			0.0250, // 25ms
+			0.0500, // 50ms
+			0.1000, // 100ms
+			1.0,    // 1s
+			10.0,   // 10s
+		},
+	}
+	metrics := pmetric.NewScopeMetrics()
+	timeStart := timeNow.Add(-time.Minute)
+	buildHistogramMetric(metricDescription, parsedMetric, timeStart, timeNow, metrics)
+
+	expectedMetrics := pmetric.NewScopeMetrics()
+	expectedMetric := expectedMetrics.Metrics().AppendEmpty()
+	expectedMetric.SetName("testHistogram")
+	expectedMetric.SetEmptyHistogram().SetAggregationTemporality(pmetric.AggregationTemporalityDelta)
+	dp := expectedMetric.Histogram().DataPoints().AppendEmpty()
+	dp.SetTimestamp(pcommon.NewTimestampFromTime(timeNow))
+	dp.SetStartTimestamp(pcommon.NewTimestampFromTime(timeStart))
+	dp.SetCount(9)
+	dp.SetMin(0)
+	dp.SetMax(10)
+	dp.SetSum(11.1861)
+	dp.BucketCounts().FromRaw([]uint64{
+		1, // 2^-14
+		1, // 2^-13
+		0, // 2^-12
+		0, // 2^-11
+		0, // 2^-10
+		1, // 2^-9
+		0, // 2^-8
+		0, // 2^-7
+		1, // 2^-6
+		1, // 2^-5
+		1, // 2^-4
+		1, // 2^-3
+		0, // 2^-2
+		0, // 2^-1
+		1, // 2^0
+		0, // 2^1
+		0, // 2^2
+		0, // 2^3
+		1, // 2^4
+		0, // 2^5
+		0, // 2^6
+		0, // 2^7
+		0, // 2^8
+		0, // 2^9
+		0, // 2^10
+		0, // 2^11
+		0, // 2^12
+		0, // 2^13
+		0, // 2^14
+		0, // 2^15
+	})
+	dp.ExplicitBounds().FromRaw(explicitHistogramBoundaries)
+	dp.Attributes().PutStr("mykey", "myvalue")
+	dp.Attributes().PutStr("mykey2", "myvalue2")
+
+	assert.Equal(t, expectedMetrics, metrics)
 }
