@@ -85,6 +85,7 @@ type StatsDParser struct {
 	isMonotonicCounter   bool
 	timerEvents          ObserverCategory
 	histogramEvents      ObserverCategory
+	distributionEvents   ObserverCategory
 	lastIntervalTime     time.Time
 	BuildInfo            component.BuildInfo
 }
@@ -171,6 +172,7 @@ func (p *StatsDParser) Initialize(enableMetricType bool, enableSimpleTags bool, 
 	p.resetState(timeNowFunc())
 
 	p.histogramEvents = defaultObserverCategory
+	p.distributionEvents = defaultObserverCategory
 	p.timerEvents = defaultObserverCategory
 	p.enableMetricType = enableMetricType
 	p.enableSimpleTags = enableSimpleTags
@@ -178,9 +180,12 @@ func (p *StatsDParser) Initialize(enableMetricType bool, enableSimpleTags bool, 
 	// Note: validation occurs in ("../".Config).validate()
 	for _, eachMap := range sendTimerHistogram {
 		switch eachMap.StatsdType {
-		case HistogramTypeName, DistributionTypeName:
+		case HistogramTypeName:
 			p.histogramEvents.method = eachMap.ObserverType
 			p.histogramEvents.histogramConfig = expoHistogramConfig(eachMap.Histogram)
+		case DistributionTypeName:
+			p.distributionEvents.method = eachMap.ObserverType
+			p.distributionEvents.histogramConfig = expoHistogramConfig(eachMap.Histogram)
 		case TimingTypeName, TimingAltTypeName:
 			p.timerEvents.method = eachMap.ObserverType
 			p.timerEvents.histogramConfig = expoHistogramConfig(eachMap.Histogram)
@@ -295,8 +300,10 @@ var timeNowFunc = time.Now
 
 func (p *StatsDParser) observerCategoryFor(t MetricType) ObserverCategory {
 	switch t {
-	case HistogramType, DistributionType:
+	case HistogramType:
 		return p.histogramEvents
+	case DistributionType:
+		return p.distributionEvents
 	case TimingType:
 		return p.timerEvents
 	case CounterType, GaugeType:
