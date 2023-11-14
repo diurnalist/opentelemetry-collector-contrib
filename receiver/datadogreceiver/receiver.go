@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/receiver"
 	"go.opentelemetry.io/collector/receiver/receiverhelper"
+	"go.uber.org/zap"
 )
 
 type datadogReceiver struct {
@@ -102,8 +103,8 @@ func (ddr *datadogReceiver) handleTraces(w http.ResponseWriter, req *http.Reques
 	err = ddr.nextConsumer.ConsumeTraces(obsCtx, otelTraces)
 	if err != nil {
 		http.Error(w, "Trace consumer errored out", http.StatusInternalServerError)
-		ddr.params.Logger.Error("Trace consumer errored out")
+		ddr.params.Logger.Error("Trace consumer errored out", zap.Error(err))
 	} else {
-		_, _ = w.Write([]byte("OK"))
+		_, _ = w.Write([]byte("{}"))
 	}
 }
