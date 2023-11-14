@@ -174,15 +174,19 @@ func buildHistogramMetric(desc statsDMetricDescription, histogram explicitHistog
 		min = math.Min(min, dpt)
 		max = math.Max(max, dpt)
 
-		idx := int(mapper.MapToIndex(dpt))
-		// normalize to [0, ...)
-		idx += (dp.BucketCounts().Len() / 2) + 1
+		// move past [-Inf, 0) bucket
+		idx := int(mapper.MapToIndex(dpt)) + 1
+		totalBuckets := dp.BucketCounts().Len()
+		// normalize to [0, ...),
+		idx += (totalBuckets / 2)
 
-		if idx >= 0 && idx < dp.BucketCounts().Len() {
-			dp.BucketCounts().SetAt(idx, dp.BucketCounts().At(idx)+1)
-		} else {
-			dp.BucketCounts().SetAt(0, dp.BucketCounts().At(0)+1)
+		if idx < 0 {
+			idx = 0
+		} else if idx >= totalBuckets {
+			idx = totalBuckets - 1
 		}
+
+		dp.BucketCounts().SetAt(idx, dp.BucketCounts().At(idx)+1)
 	}
 
 	dp.SetCount(uint64(len(histogram.points)))
