@@ -10,7 +10,6 @@ import (
 	"github.com/lightstep/go-expohisto/structure"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
-	"golang.org/x/exp/slices"
 	"gonum.org/v1/gonum/stat"
 )
 
@@ -108,6 +107,10 @@ func buildDatadogSummaryMetric(desc statsDMetricDescription, summary summaryMetr
 	mMedian.SetName(desc.name + ".median")
 	mMedianGauge := mMedian.SetEmptyGauge()
 
+	mMin := ilm.Metrics().AppendEmpty()
+	mMin.SetName(desc.name + ".min")
+	mMinGauge := mMin.SetEmptyGauge()
+
 	mMax := ilm.Metrics().AppendEmpty()
 	mMax.SetName(desc.name + ".max")
 	mMaxGauge := mMax.SetEmptyGauge()
@@ -116,18 +119,15 @@ func buildDatadogSummaryMetric(desc statsDMetricDescription, summary summaryMetr
 	mPercentile95.SetName(desc.name + ".95percentile")
 	mPercentile95Gauge := mPercentile95.SetEmptyGauge()
 
-	numPoints := len(summary.points)
-	rawValues := make([]float64, numPoints)
 	count := float64(0)
 	sum := float64(0)
 	for i := range summary.points {
 		c := summary.weights[i]
 		count += c
-		rawValues[i] = summary.points[i] * c
-		sum += rawValues[i]
+		sum += summary.points[i] * c
 	}
 
-	slices.Sort(rawValues)
+	sort.Sort(dualSorter{summary.points, summary.weights})
 
 	startTimestamp := pcommon.NewTimestampFromTime(startTime)
 	nowTimestamp := pcommon.NewTimestampFromTime(timeNow)
@@ -138,24 +138,17 @@ func buildDatadogSummaryMetric(desc statsDMetricDescription, summary summaryMetr
 	setCommonDpFields(mCountDp, startTimestamp, nowTimestamp, desc)
 
 	mAvgDp := mAvgGauge.DataPoints().AppendEmpty()
-	mAvgDp.SetDoubleValue(sum / float64(len(rawValues)))
+	mAvgDp.SetDoubleValue(sum / count)
 	setCommonDpFields(mAvgDp, startTimestamp, nowTimestamp, desc)
 
-	mMedianDp := mMedianGauge.DataPoints().AppendEmpty()
-	if numPoints%2 == 0 {
-		mMedianDp.SetDoubleValue(rawValues[numPoints/2-1] + ((rawValues[numPoints/2] - rawValues[numPoints/2-1]) / 2))
-	} else {
-		mMedianDp.SetDoubleValue(rawValues[numPoints/2])
+	for _, s := range []struct {
+		gauge    pmetric.Gauge
+		quantile float64
+	}{{mMinGauge, 0.0}, {mMedianGauge, 0.50}, {mPercentile95Gauge, 0.95}, {mMaxGauge, 1.0}} {
+		dp := s.gauge.DataPoints().AppendEmpty()
+		dp.SetDoubleValue(stat.Quantile(s.quantile, stat.Empirical, summary.points, summary.weights))
+		setCommonDpFields(dp, startTimestamp, nowTimestamp, desc)
 	}
-	setCommonDpFields(mMedianDp, startTimestamp, nowTimestamp, desc)
-
-	mMaxDp := mMaxGauge.DataPoints().AppendEmpty()
-	mMaxDp.SetDoubleValue(rawValues[numPoints-1])
-	setCommonDpFields(mMaxDp, startTimestamp, nowTimestamp, desc)
-
-	mP95Dp := mPercentile95Gauge.DataPoints().AppendEmpty()
-	mP95Dp.SetDoubleValue(stat.Quantile(0.95, stat.Empirical, rawValues, nil))
-	setCommonDpFields(mP95Dp, startTimestamp, nowTimestamp, desc)
 }
 
 func setCommonDpFields(dp pmetric.NumberDataPoint, start pcommon.Timestamp, now pcommon.Timestamp, desc statsDMetricDescription) {
