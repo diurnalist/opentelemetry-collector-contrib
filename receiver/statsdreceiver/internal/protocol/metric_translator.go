@@ -92,6 +92,73 @@ func buildSummaryMetric(desc statsDMetricDescription, summary summaryMetric, sta
 	}
 }
 
+func buildDatadogSummaryMetric(desc statsDMetricDescription, summary summaryMetric, startTime, timeNow time.Time, ilm pmetric.ScopeMetrics) {
+	mCount := ilm.Metrics().AppendEmpty()
+	mCount.SetName(desc.name + ".count")
+	mCountSum := mCount.SetEmptySum()
+	mCountSum.SetIsMonotonic(true)
+	mCountSum.SetAggregationTemporality(pmetric.AggregationTemporalityDelta)
+
+	mAvg := ilm.Metrics().AppendEmpty()
+	mAvg.SetName(desc.name + ".avg")
+	mAvgGauge := mAvg.SetEmptyGauge()
+
+	mMedian := ilm.Metrics().AppendEmpty()
+	mMedian.SetName(desc.name + ".median")
+	mMedianGauge := mMedian.SetEmptyGauge()
+
+	mMin := ilm.Metrics().AppendEmpty()
+	mMin.SetName(desc.name + ".min")
+	mMinGauge := mMin.SetEmptyGauge()
+
+	mMax := ilm.Metrics().AppendEmpty()
+	mMax.SetName(desc.name + ".max")
+	mMaxGauge := mMax.SetEmptyGauge()
+
+	mPercentile95 := ilm.Metrics().AppendEmpty()
+	mPercentile95.SetName(desc.name + ".95percentile")
+	mPercentile95Gauge := mPercentile95.SetEmptyGauge()
+
+	count := float64(0)
+	sum := float64(0)
+	for i := range summary.points {
+		c := summary.weights[i]
+		count += c
+		sum += summary.points[i] * c
+	}
+
+	sort.Sort(dualSorter{summary.points, summary.weights})
+
+	startTimestamp := pcommon.NewTimestampFromTime(startTime)
+	nowTimestamp := pcommon.NewTimestampFromTime(timeNow)
+
+	mCountDp := mCountSum.DataPoints().AppendEmpty()
+	// Note: count is rounded here, see note in counterValue().
+	mCountDp.SetIntValue(int64(count))
+	setCommonDpFields(mCountDp, startTimestamp, nowTimestamp, desc)
+
+	mAvgDp := mAvgGauge.DataPoints().AppendEmpty()
+	mAvgDp.SetDoubleValue(sum / count)
+	setCommonDpFields(mAvgDp, startTimestamp, nowTimestamp, desc)
+
+	for _, s := range []struct {
+		gauge    pmetric.Gauge
+		quantile float64
+	}{{mMinGauge, 0.0}, {mMedianGauge, 0.50}, {mPercentile95Gauge, 0.95}, {mMaxGauge, 1.0}} {
+		dp := s.gauge.DataPoints().AppendEmpty()
+		dp.SetDoubleValue(stat.Quantile(s.quantile, stat.Empirical, summary.points, summary.weights))
+		setCommonDpFields(dp, startTimestamp, nowTimestamp, desc)
+	}
+}
+
+func setCommonDpFields(dp pmetric.NumberDataPoint, start pcommon.Timestamp, now pcommon.Timestamp, desc statsDMetricDescription) {
+	dp.SetStartTimestamp(start)
+	dp.SetTimestamp(now)
+	for i := desc.attrs.Iter(); i.Next(); {
+		dp.Attributes().PutStr(string(i.Attribute().Key), i.Attribute().Value.AsString())
+	}
+}
+
 func buildHistogramMetric(desc statsDMetricDescription, histogram histogramMetric, startTime, timeNow time.Time, ilm pmetric.ScopeMetrics) {
 	nm := ilm.Metrics().AppendEmpty()
 	nm.SetName(desc.name)
