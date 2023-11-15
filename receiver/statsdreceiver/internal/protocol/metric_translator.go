@@ -18,17 +18,16 @@ import (
 var (
 	statsDDefaultPercentiles = []float64{0, 10, 50, 90, 95, 100}
 
-	explicitHistogramMaxSize                              = 30 // covers values from 2^-15..2^15, roughly
+	explicitHistogramMaxSize                              = 30 // covers values from 2^-14..2^15, roughly
 	explicitHistogramBoundaries, explicitHistogramBuckets = getExplicitHistogramBoundaries()
 )
 
 func getExplicitHistogramBoundaries() ([]float64, []uint64) {
-	scale := 0
-	boundaries := []float64{math.Inf(-1)}
+	boundaries := []float64{0}
 	buckets := []uint64{0}
 	for i := 0; i < explicitHistogramMaxSize; i++ {
-		exponent := i - (explicitHistogramMaxSize / 2)
-		boundaries = append(boundaries, math.Pow(2, float64(exponent)*math.Pow(2.0, -float64(scale))))
+		exponent := i - (explicitHistogramMaxSize / 2) + 1
+		boundaries = append(boundaries, math.Pow(2, float64(exponent)*math.Pow(2.0, 0)))
 		buckets = append(buckets, 0)
 	}
 	return boundaries, buckets
@@ -174,11 +173,12 @@ func buildHistogramMetric(desc statsDMetricDescription, histogram explicitHistog
 		min = math.Min(min, dpt)
 		max = math.Max(max, dpt)
 
-		// move past [-Inf, 0) bucket
-		idx := int(mapper.MapToIndex(dpt)) + 1
+		idx := int(mapper.MapToIndex(dpt))
 		totalBuckets := dp.BucketCounts().Len()
 		// normalize to [0, ...),
 		idx += (totalBuckets / 2)
+		// move past [-Inf, 0) bucket
+		idx++
 
 		if idx < 0 {
 			idx = 0
