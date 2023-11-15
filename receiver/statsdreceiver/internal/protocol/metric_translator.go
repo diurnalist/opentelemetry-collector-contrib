@@ -8,7 +8,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/lightstep/go-expohisto/mapping/exponent"
 	"github.com/lightstep/go-expohisto/structure"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
@@ -23,8 +22,8 @@ var (
 )
 
 func getExplicitHistogramBoundaries() ([]float64, []uint64) {
-	boundaries := []float64{0}
-	buckets := []uint64{0}
+	boundaries := []float64{}
+	buckets := []uint64{}
 	for i := 0; i < explicitHistogramMaxSize; i++ {
 		exponent := i - (explicitHistogramMaxSize / 2) + 1
 		boundaries = append(boundaries, math.Pow(2, float64(exponent)*math.Pow(2.0, 0)))
@@ -163,8 +162,6 @@ func buildHistogramMetric(desc statsDMetricDescription, histogram explicitHistog
 	dp.ExplicitBounds().FromRaw(explicitHistogramBoundaries)
 	dp.BucketCounts().FromRaw(explicitHistogramBuckets)
 
-	mapper, _ := exponent.NewMapping(0)
-
 	sum := 0.0
 	min := math.MaxFloat64
 	max := -math.MaxFloat64
@@ -173,18 +170,7 @@ func buildHistogramMetric(desc statsDMetricDescription, histogram explicitHistog
 		min = math.Min(min, dpt)
 		max = math.Max(max, dpt)
 
-		idx := int(mapper.MapToIndex(dpt))
-		totalBuckets := dp.BucketCounts().Len()
-		// normalize to [0, ...),
-		idx += (totalBuckets / 2)
-		// move past [-Inf, 0) bucket
-		idx++
-
-		if idx < 0 {
-			idx = 0
-		} else if idx >= totalBuckets {
-			idx = totalBuckets - 1
-		}
+		idx := sort.SearchFloat64s(explicitHistogramBoundaries, float64(dpt))
 
 		dp.BucketCounts().SetAt(idx, dp.BucketCounts().At(idx)+1)
 	}
