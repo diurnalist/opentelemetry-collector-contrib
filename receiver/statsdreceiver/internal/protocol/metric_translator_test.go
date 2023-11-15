@@ -409,8 +409,7 @@ func TestBuildHistogramMetric(t *testing.T) {
 	dp.SetMax(10)
 	dp.SetSum(11.1861)
 	dp.BucketCounts().FromRaw([]uint64{
-		1, // 0
-		0, // 2^-14
+		1, // 2^-14
 		1, // 2^-13
 		0, // 2^-12
 		0, // 2^-11
@@ -445,5 +444,5 @@ func TestBuildHistogramMetric(t *testing.T) {
 	dp.Attributes().PutStr("mykey", "myvalue")
 	dp.Attributes().PutStr("mykey2", "myvalue2")
 
-	assert.Equal(t, metrics, expectedMetrics)
+	assert.Equal(t, expectedMetrics, metrics)
 }
