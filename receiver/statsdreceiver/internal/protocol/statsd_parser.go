@@ -468,6 +468,11 @@ func parseMessageToMetric(line string, enableMetricType bool, enableSimpleTags b
 			tagSets := strings.Split(tagsStr, ",")
 
 			for _, tagSet := range tagSets {
+				// ignore totally empty tags (some clients send this)
+				if len(tagSet) == 0 {
+					continue
+				}
+
 				tagParts := strings.SplitN(tagSet, ":", 2)
 				k := tagParts[0]
 				if k == "" {
